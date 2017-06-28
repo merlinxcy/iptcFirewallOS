@@ -8,7 +8,7 @@ import os
 import socket
 import dpkt
 import re
-#import mongolib
+import mongolib
 class PacketFilter:
 	debug='False'
 	afterdecode=''
@@ -44,16 +44,18 @@ class PacketFilter:
 	def __init__(self,debug=False):
 		self.debug=debug
 		self.count=0
-		os.system('iptables -A OUTPUT -j NFQUEUE')
-		#self.mongodb=mongolib.mongodb()
+		self.mongo=mongolib.mongodb()
+		os.system('iptables -I OUTPUT -d 192.168.0.8 -j NFQUEUE --queue-num 1')
+		
 	def start(self,package):
+		self.mongo=mongolib.mongodb()
 		self.package=package
 		#data = self.package.get_payload()
 		data = self.package.get_data()
 		ip_info = dpkt.ip.IP(data)
 		tcp_info= dpkt.tcp.TCP(data)
 		print socket.inet_ntoa(ip_info.src)+" to "+socket.inet_ntoa(ip_info.dst)
-		#mongodb.log_collect(ipsrc=str(socket.inet_ntoa(ip_info.src)),ipdst=str(socket.inet_ntoa(ip_info.dst)))
+		self.mongo.log_collect(ipsrc=str(socket.inet_ntoa(ip_info.src)),ipdst=str(socket.inet_ntoa(ip_info.dst)))
 		data_16 = dpkt.hexdump(str(data), 16)
 		self.count+=1
 		print "----------------"+str(self.count)+"---------------------"
@@ -74,6 +76,8 @@ class PacketFilter:
 
 
 		package.set_verdict(nfqueue.NF_ACCEPT)
+		self.mongo.log_input()
+		self.mongo.log_bufc()
 		##
 		'''
 		print "-------------------------------------"
@@ -161,7 +165,7 @@ class PacketFilter:
 		#print self.afterdecode[44:48]
 		#print self.afterdecode[114:116]
 		#print self.afterdecode[118:127]
-		#print self.afterdecode[138:140]
+		#print self.afterdecode[138:140]	
 		if(len(self.afterdecode)>156):##判断afterdecode大小防止溢出
 			if(self.afterdecode[44:48]=='0066' and self.afterdecode[114:116]=='f0'):#位置57数值f0PDU type:DT Data(0x0f)
 				if(self.afterdecode[118:126]=='01000100'):#ISO 8327-1 OSI Session Protocol长度固定以01开头
@@ -179,7 +183,6 @@ class PacketFilter:
 						
 						data = self.package.get_data()
 						ip_info = dpkt.ip.IP(data)
-						tcp_info= dpkt.tcp.TCP(data)
 						if self.init_mms_fingerprint==[]:
 							print "[-]No init mms has been created"
 							return False
@@ -212,8 +215,10 @@ class PacketFilter:
 									#print "for in init_mms_fingerprint"
 									if t==tmpfun:
 										print "[+]Identify"
+										mongodb.log_collect(msg='This mms resquest/response is identifyed.')
 										return True
 							print "[-]mms request/response packet unidentify"
+							mongodb.log_collect(msg='mms request/response packet unidentify')
 							return False#最后都没找到return False
 
 
@@ -254,7 +259,11 @@ class PacketFilter:
 							}
 							self.init_mms_fingerprint.append(mms_finger)
 							print self.init_mms_fingerprint
+							self.mongo.log_collect(msg='init mms success')
 							#到这里为止init mms中支持的服务已经被记录，以供来检查后续报文的合法性
+							return True
+		return False
+		self.mongo.log_collect(msg='init mms failed')
 
 
 
@@ -271,7 +280,7 @@ class PacketFilter:
 		print "ok"
 		q.set_callback(self.start)
 		print "ok"
-		q.create_queue(0)
+		q.create_queue(1)
 		print "ok"
 		try:
 			print "ook"

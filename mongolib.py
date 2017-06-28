@@ -12,7 +12,7 @@ class mongodb:
 	level=''
 	id=0
 	def __init__(self):
-		self.mongo=MongoClient('mongodb://localhost:27017/')
+		self.mongo=MongoClient('mongodb://127.0.0.1:27017/',connect=False)
 		self.db=self.mongo['firewall']
 		self.collection=self.db['log_cache']
 
@@ -53,6 +53,7 @@ class mongodb:
 	def log_output(self):
 		query={}
 		cursor=self.collection.find()
+		print cursor
 		for doc in cursor:
 			print doc
 			print '-----------------------------'
