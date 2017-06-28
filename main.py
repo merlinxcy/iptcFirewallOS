@@ -1,299 +1,386 @@
-# -*- coding: utf-8 -*-
-#5/13 
-#when we start the firewall,this module must start(important)
-import nfqueue
-from scapy.all import *
-import sys
+# gaba coding:utf-8 gaba
+# @gaba 16.11.07
+
+import json
 import os
-import socket
-import dpkt
-import re
-import mongolib
-class PacketFilter:
-	debug='False'
-	afterdecode=''
-	payload_len=''
-	package=''
-	modbus_func_code={
-		"dispersed_and_input": "02",
-		"read_coil":"01",
-		"write_single_coil":"05",
-		"write_multiple_coil":"0f",
-		"read_input_register":"04",
-		"read_multiple_register":"03",
-		"write_single_register":"06",
-		"write_multiple_register":"10",
-		"read_write_multiple_register":"17",
-		"cannot_write_register":"16",
-		"read_file_record":"14",
-		"write_file_record":"15",
-		"read_recognize":"2b",
-	}
-	init_mms_fingerprint=list()
-	iec61850_mms_func=['status','getNameList','identify','rename','read','write','getVariableAccessAttributes','defineNamedVariable','defineScatteredAccess','getScatteredAccessAttributes','deleteVariableAccess','defineNamedVariableList','getNamedVariableListAttributes','deleteNamedVariableList','defineNamedType','getNamedTypeAttributes','deleteNamedType','input','output','takeControl','relinquishControl','defineSemaphore','deleteSemaphore','reportSemphoreStauts','reportPoolSemaphoreStatus','reportSemaphoreEntryStatus','initiateDownloadSequence','downloadSegment','terminateDownloadSequence','initiateUploadSequence','uploadSegment','terminateUploadSequence','requestDomainDownload','requestDomainUpload','loadDomainContent','storeDomainContent','deleteDomain','getDomainAttributes','createProgramInvocation','deleteProgramInvocation','start','stop','resume','reset','kill','getProgramInvocationAttributes','obtainFile','defineEventCondition','deleteEventCondition','getEventConditionAttributes','reportEventCondiditionStauts','alterEventConditionMoitoring','triggerEvent','defineEventAction','deleteEventAction','getEventActionAttributes','reportActionStatus','defineEventEnrollment','deleteEventEnrollment','alterEventEnrollmemt','reportEventEnrollmentAttributes','getEventEnrollmentAttributes','acknowledgeEventnotification','getAlarmSummary','getAlarmEnrollmentSummary','readJournal','writeJournal','initializeJournal','reportJournalStatus','createJournal','deleteJournal','getCapabilityList','fileOpen','fileRead','fileClose','fileRename','fileDelete','fileDirectory','unsolicitedStatus','informationReport','eventNotification','attachToEventCondition','attachToSemaphore','conclude','cancel']
-	iec61850_mms_func_code={
-		"read":"a4",#
-		"write":"a5",#
-		"getNameList":"a1",#77
-		"fileDirectory":"4d",#78
-		"fileOpen":"48",
-		"fileRead":"49",
-	}
+import sys
 
-	#mongodb=''
-	def __init__(self,debug=False):
-		self.debug=debug
-		self.count=0
-		self.mongo=mongolib.mongodb()
-		os.system('iptables -I OUTPUT -d 192.168.0.8 -j NFQUEUE --queue-num 1')
-		
-	def start(self,package):
-		self.mongo=mongolib.mongodb()
-		self.package=package
-		#data = self.package.get_payload()
-		data = self.package.get_data()
-		ip_info = dpkt.ip.IP(data)
-		tcp_info= dpkt.tcp.TCP(data)
-		print socket.inet_ntoa(ip_info.src)+" to "+socket.inet_ntoa(ip_info.dst)
-		self.mongo.log_collect(ipsrc=str(socket.inet_ntoa(ip_info.src)),ipdst=str(socket.inet_ntoa(ip_info.dst)))
-		data_16 = dpkt.hexdump(str(data), 16)
-		self.count+=1
-		print "----------------"+str(self.count)+"---------------------"
-		print data_16
-		##--
-		print dpkt.tcp.TCP(data).__class__.__name__ 
-		temp=re.findall(r'  [0-9][0-9][0-9][0-9]:  (.*?)  ',data_16)
-		package_after_decode=''
-		for i in temp:
-			package_after_decode+=i
-		package_after_decode=package_after_decode.replace('  ',' ')
-		package_after_decode=package_after_decode.replace(' ','')
-		self.afterdecode=package_after_decode
-		##
-		#print self.afterdecode
-		if self.judge_iec61850_mms()==False:
-			package.set_verdict(nfqueue.NF_DROP)
+import tornado.httpserver
+import tornado.ioloop
+import tornado.options
+import tornado.web
+from tornado import gen
+from tornado.options import define, options
+
+from lib.system_info import get_interface_info
+from lib.data_stroge import LogDataStorage
+from lib.dict_unicode_to_utf import convert
+from lib.json_encoder import JSONEncoder
+from lib.libiptables import *
+from data import get_coll
+from lib.netfilter import mmain
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+define("port", default=4566, help="run on the given port", type=int)
+define("verbose", default=False, help="verbose", type=bool)
+define("debug", default=False, help="debug", type=bool)
 
 
-		package.set_verdict(nfqueue.NF_ACCEPT)
-		self.mongo.log_input()
-		self.mongo.log_bufc()
-		##
-		'''
-		print "-------------------------------------"
-		if not(self.judge_tcp_attack()):#judge tcp attack
-			package.set_verdict(nfqueue.NF_DROP)
-		if not(self.judge_modbus_attack()):
-			package.set_verdict(nfqueue.NF_DROP)
-		package.set_verdict(nfqueue.NF_ACCEPT)
-		print ("---------------------------------------------------------")
-		'''
-		#mongodb.log_input()
-		#mongodb.bufc()
-	'''
-	def judge_udp_attack(self):(thought l want to judge UDP,the dhcp use it,it's difficult)
-		if(self.afterdecode[18:20]=='11'):
-			print("this is udp package")
-			return True
-	'''
+class Application(tornado.web.Application):
+    def __init__(self):
+        handlers = [
+            (r"/", HomeHandler),
+            (r"/auth/login", AuthLoginHandler),
+            (r"/auth/logout", AuthLogoutHandler),
+            #(r"/check_json", JsonCheckerHandler),
+            (r"/system_status", SystemStatusHandler),
+            (r"/firewall", FirewallHandler),
+            (r"/firewall/display", FirewallDisplayHandler),
+            (r"/firewall/add", FirewallAddHandler),
+            (r"/firewall/delete", FirewallDeleteHandler),
+            (r"/ips", IPSHandler),
+        ]
+        settings = dict(
+            template_path=os.path.join(os.path.dirname(__file__), "templates"),
+            static_path=os.path.join(os.path.dirname(__file__), "static"),
+            # xsrf_cookies=True,
+            cookie_secret="GabaGabaasaddGabaHey",
+            login_url="/auth/login",
+            debug=options.debug,
+        )
+        super(Application, self).__init__(handlers, **settings)
 
 
-	def judge_tcp_attack(self):
-		if(self.afterdecode[66:68]=='03'):#syn and find can't be 1 together
-			print ("this is syn/fin attack")
-			#record in mongodb
-			#mongodb.log_collect(msg='this is syn/fin attack')
-			return False
-		elif(self.afterdecode[66:68]=='00'):#all flags can't be 0 together
-			print ("this is flag='0x00' attack")
-			return False
-			#mongodb.log_collect(msg='this is flag=\'0x00\' attack')
-			#record in mongodb
-		elif(self.afterdecode[66:68]=='01'):
-			print ("this is fin attack")
-			return False
-			#mongodb.log_collect("this is fin attack")
-			#record in mongodb
-		else:
-			print 'there is no tcp flag attack'
-			return True
-	def judge_modbus_attack(self):	
-		if(self.afterdecode[44:48]=='01f6' and self.afterdecode[85:87]!='00' and self.afterdecode[67]<'8' and self.afterdecode[19]=='6'):#44-47 is hex(port 502),85-86 is hex protocol id of modbus package) and 67 must <8 because 'push' must be '0' and 19 is tcp
-			print "This is handshake between modbus/tcp communication "
-			#mongodb.log_collect(msg='This is handshake between modbus/tcp communication')
-			return True
-		elif(self.afterdecode[44:48]=='01f6' and self.afterdecode[85:87]=='00' and self.afterdecode[67]>='8' and self.afterdecode[19]=='6'):
-			self.payload_len=self.package.get_payload_len()
-			print "this is modbus package"
-			#mongodb.log_collect(msg='this is modbus package')
-			#record in mongodb
-			if(self.afterdecode[87:89]>'00fe'):#modbus frame must <=260bytes
-				print "This modbus package's length is illegal"
-				#record in mongodb
-				#mongodb.log_collect(msg='This modbus package\'s length is illegal')
-				return False
-			else:#then we go on judging the modbus package which has legal length
-				for name in self.modbus_func_code:#judge function code
-					if(self.afterdecode[94:96]==self.modbus_func_code[name]):
-						break
-					elif(name!="read_recognize"):
-						continue
-					else:
-						print ("function code illegal")
-						mongodb.log_collect(msg='function code illegal')		
-						#record in mongodb
-						return False
-				print "this modbus package's length is legal and function code is legal"
-				print ("this modbus package is safe")
-				#mongodb.log_collect(msg='this modbus package\'s length is legal and function code is legal')
-				#mongodb.log_collect(msg='this modbus package is safe')
-				return True
-		else:
-			print("this is not modbus package and handshake package")
-			#record in mongodb
-			#mongodb.log_collect(msg='this is not modbus package and handshake package')
-			return False
+class BaseHandler(tornado.web.RequestHandler):
+    def gaba(self):
+        return "gaba"
 
-	def judge_iec61850_goose(self):
-		pass
+    def get_current_user(self):
+        user_id = self.get_secure_cookie("login")
+        if not user_id:
+            return None
+        return True
 
-	def judge_iec61850_sv(self):
-		pass
+class HomeHandler(BaseHandler):
+    """
+    OUTPUT WEB PAGE
+    """
+
+    def get(self):
+        if not self.get_current_user():
+            self.redirect("/auth/login")
+        else:
+            self.render("index.html")
 
 
-	def judge_iec61850_mms(self):
-		#print self.afterdecode[44:48]
-		#print self.afterdecode[114:116]
-		#print self.afterdecode[118:127]
-		#print self.afterdecode[138:140]	
-		if(len(self.afterdecode)>156):##判断afterdecode大小防止溢出
-			if(self.afterdecode[44:48]=='0066' and self.afterdecode[114:116]=='f0'):#位置57数值f0PDU type:DT Data(0x0f)
-				if(self.afterdecode[118:126]=='01000100'):#ISO 8327-1 OSI Session Protocol长度固定以01开头
-					if(self.afterdecode[138:140]=='03'):
-						print "!!@2$^&%!!this is request/response mms"
-						tmpfun=''
-						for name in self.iec61850_mms_func_code:
-							if(self.afterdecode[154:156]==self.iec61850_mms_func_code[name]):
-								print "confirmedservicerequest:"+name
-								tmpfun=name
-							if (self.afterdecode[156:158]==self.iec61850_mms_func_code[name]):
-								print "confirmedservicerequest:"+name
-								tmpfun=name
-						#下面是检测该报文是够和init mms中支持的功能符合
-						
-						data = self.package.get_data()
-						ip_info = dpkt.ip.IP(data)
-						if self.init_mms_fingerprint==[]:
-							print "[-]No init mms has been created"
-							return False
-						else:
-							#print "1"'
-							location=-1
-						 	init_mms_fingerprint_length=len(self.init_mms_fingerprint)
-						 	print self.init_mms_fingerprint
-						 	print init_mms_fingerprint_length
-							for i in range(0,init_mms_fingerprint_length):
-								print "in for xuanhuan"
-								print self.init_mms_fingerprint[i]['ip_source']
-								print self.init_mms_fingerprint[i]['tcp_sport']
-								print self.init_mms_fingerprint[i]['tcp_dport']
-								print socket.inet_ntoa(ip_info.src)
-								print int(self.afterdecode[40:44],16)
-								print int(self.afterdecode[44:48],16)
-								if str(self.init_mms_fingerprint[i]['ip_source'])==str(socket.inet_ntoa(ip_info.src)) \
-								and str(self.init_mms_fingerprint[i]['tcp_sport'])==str(int(self.afterdecode[40:44],16)) \
-								and str(self.init_mms_fingerprint[i]['tcp_dport'])==str(int(self.afterdecode[44:48],16)):
-									location=i
-									print "okok"
-									break
-								else:
-									print "nonononono"
-									if i==init_mms_fingerprint_length-1:
-										location=-1
-							if location!=-1:
-								for t in self.init_mms_fingerprint[location]['init_mms_support_service']:
-									#print "for in init_mms_fingerprint"
-									if t==tmpfun:
-										print "[+]Identify"
-										mongodb.log_collect(msg='This mms resquest/response is identifyed.')
-										return True
-							print "[-]mms request/response packet unidentify"
-							mongodb.log_collect(msg='mms request/response packet unidentify')
-							return False#最后都没找到return False
+class SystemStatusHandler(BaseHandler):
+    """
+    API
+    OUTPUT
+    没有登录 401
+    成功登录 200
+    {'lo': {'AF_PACKET': [{'peer': '00:00:00:00:00:00', 'addr': '00:00:00:00:00:00'}],
+            'AF_INET': [{'peer': '127.0.0.1', 'netmask': '255.0.0.0', 'addr': '127.0.0.1'}]},
+     'eth0': {'AF_PACKET': [{'broadcast': 'ff:ff:ff:ff:ff:ff', 'addr': '00:0c:29:1c:83:89'}],
+              'AF_INET': [{'broadcast': '192.168.188.255', 'netmask': '255.255.255.0', 'addr': '192.168.188.142'}]}}
+    """
+
+    def get(self):
+        if not self.get_current_user():
+            raise tornado.web.HTTPError(401)
+        # status = {"version": "0.1a"}
+        # print get_interface_info()
+        self.write(get_interface_info())
 
 
+class JsonCheckerHandler(BaseHandler):
+    """
+    JUST FOR TEST
+    """
 
-		
-		if(len(self.afterdecode)>475):##判断afterdecode大小防止溢出
-			print self.afterdecode[298:230]
-			print self.afterdecode[316:326]
-			if(self.afterdecode[44:48]=='0066' and self.afterdecode[114:116]=='f0'):#位置57数值f0PDU type:DT Data(0x0f)
-				if(self.afterdecode[118:120]=='0d'):#SPDU Type:(CONNECT(CN)SPDU(13))会话层init标签
-					if(self.afterdecode[298:300]=='01'):#PDV-LIST presentation-context-identifier:1context-list item id-as-acse
-						if(self.afterdecode[316:326]=='28ca220203'):#iso association control service1.0.9506.2.3(mms)
-							print "!!@2$^&%!!this is mms init "
-							##这边加一个对服务器支持服务的判别，可以用来过滤上下文的请求数据包,可能存在问题
-							data = self.package.get_data()
-							ip_info = dpkt.ip.IP(data)
-							tmp_funcode=self.afterdecode[456:478]#取出init报文的服务器支持功能码以供上下文判断
-							tmp_funcode_bin=''
-							print tmp_funcode
-							#计算出服务开启的二进制位
-							for i in range(0,len(tmp_funcode)/2):
-								t=tmp_funcode[2*i]+tmp_funcode[2*i+1]
-								print t
-								t=str(bin(int(t,16)))[2:].zfill(8)
-								print t
-								tmp_funcode_bin+=t
-							#匹配服务
-							print tmp_funcode_bin
-							init_mms_support_service=list()
-							for i in range(0,len(self.iec61850_mms_func)-1):
-								if tmp_funcode_bin[i]=='1':
-									init_mms_support_service.append(self.iec61850_mms_func[i])
-							mms_finger={
-							"ip_source":str(socket.inet_ntoa(ip_info.src)),
-							"tcp_sport":str(int(self.afterdecode[40:44],16)),
-							"tcp_dport":str(int(self.afterdecode[44:48],16)),
-							"init_mms_support_service":init_mms_support_service
-							}
-							self.init_mms_fingerprint.append(mms_finger)
-							print self.init_mms_fingerprint
-							self.mongo.log_collect(msg='init mms success')
-							#到这里为止init mms中支持的服务已经被记录，以供来检查后续报文的合法性
-							return True
-		return False
-		self.mongo.log_collect(msg='init mms failed')
+    def post(self):
+        data = json.loads(self.request.body.decode('utf-8'))
+        print data
+        self.write(data)
 
 
+class AuthLoginHandler(BaseHandler):
+    def get(self):
+        """
+        OUTPUT WEB PAGE
+        """
+        login = self.get_secure_cookie("login")
+        if login:
+            self.redirect("/")
+        else:
+            self.render("login.html")
+
+    @gen.coroutine
+    def post(self):
+        """
+        API
+        INPUT POST
+        {"username": "admin",
+        "password": "asdada"}
+        OUTPUT
+        如果已经登录 403
+        数据格式错误 406
+        登录成功 200 {"success": "True"}
+        登录失败 400
+        """
+        login_check = self.get_secure_cookie("login")
+        if login_check:
+            raise tornado.web.HTTPError(403)
+        if not self.request.body:
+            raise tornado.web.HTTPError(406)
+        data = json.loads(self.request.body.decode('utf-8'))
+        if not data or not isinstance(data, dict):
+            raise tornado.web.HTTPError(406)
+        if "username" not in data or "password" not in data:
+            raise tornado.web.HTTPError(406)
+        # TODO username password check
+        if data.get("username") == "admin" and data.get("password") == "admin":
+            self.set_secure_cookie("login", "asd")
+            login_status = {"success": "True"}
+            self.write(login_status)
+        else:
+            raise tornado.web.HTTPError(400)
 
 
+class AuthLogoutHandler(BaseHandler):
+    def get(self):
+        """
+        API
+        OUTPUT
+        如果没有登录 403
+        成功登出 200 {"success": "True"}
+        """
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+            raise tornado.web.HTTPError(403)
+        self.clear_cookie("login")
+        self.write({"success": "True"})
 
-		#if(len(self.))
+
+class FirewallHandler(BaseHandler):
+    """
+    OUTPUT Web Page
+    如果没有登录返回401
+    登录可以正常返回
+    """
+
+    def get(self):
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+            raise tornado.web.HTTPError(401)
+        self.render("temp.html")
 
 
+class FirewallDisplayHandler(BaseHandler):
+    """
+    API
 
-	def run(self):
-		q=nfqueue.queue()
-		q.open()
-		q.bind(socket.AF_INET)
-		print "ok"
-		q.set_callback(self.start)
-		print "ok"
-		q.create_queue(1)
-		print "ok"
-		try:
-			print "ook"
-			q.try_run()
-			print "ook"
-		except KeyboardInterrupt:
-			print "ook"
-			q.unbind(socket.AF_INET)
-			q.close()
-			os.system('iptables -F')
-			os.system('iptables -X')
-					
-if __name__=='__main__':
-	print 123
-	judge=PacketFilter(debug=True)
-	judge.run()
+    INPUT
+    GET /firewall/display
+    OUTPUT
+    如果没有登录 401
+    成功返回JSON
+    {"rules": [{"INPUT": [
+    {"src": "192.168.1.1/255.255.255.255", "protocol": "tcp", "dst": "0.0.0.0/0.0.0.0", "number": 0, "dport": "50",
+    "in": null, "action": "ACCEPT", "sport", "out": null}]}, {"OUTPUT": []}, {"FORWARD": []}],
+    "result": "True"}
+    """
+
+    def get(self):
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+            raise tornado.web.HTTPError(401)
+        iptb = ShowIptables(debug=True)
+        input_rules = iptb.get_rules("filter", "INPUT")
+        output_rules = iptb.get_rules("filter", "OUTPUT")
+        forward_rules = iptb.get_rules("filter", "FORWARD")
+        result = {"result": "True",
+                  "rules": [{"INPUT": self._split_rules(input_rules)},
+                            {"OUTPUT": self._split_rules(output_rules)},
+                            {"FORWARD": self._split_rules(forward_rules)}]
+                  }
+        print result
+        self.write(result)
+
+    def _split_rules(self, rules):
+        split_rules = []
+        for rule_number in range(len(rules)):
+            rule = rules[rule_number]
+            rule_dict = {"number": rule_number, "protocol": rule.protocol, "src": rule.src, "dst": rule.dst,
+                         "in": rule.in_interface, "out": rule.out_interface, "action": rule.target.name}
+            if len(rule.matches) > 0:
+                for match in rule.matches:
+                    if match.sport:
+                        rule_dict.update({"sport": match.sport})
+                    else:
+                        rule_dict.update({"sport":""})
+                    if match.dport:
+                        rule_dict.update({"dport": match.dport})
+                    else:
+                        rule_dict.update({"dport":""})
+            split_rules.append(rule_dict)
+        return split_rules
+
+
+class FirewallAddHandler(BaseHandler):
+    """
+    API
+    
+    INPUT
+    {"chain",
+     "sip",
+     "dip",
+     "sport",
+     "dport",
+     "protocol",
+     "iintf",
+     "ointf",
+     "action"
+     }
+     
+    OUTPUT
+    未登录 401
+    数据格式异常 406
+    成功添加 200 {"result":"True", "error_message":"error"}
+    """
+
+    def post(self):
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+            raise tornado.web.HTTPError(401)
+        if not self.request.body:
+            raise tornado.web.HTTPError(406)
+        data = json.loads(self.request.body.encode("utf-8"))
+        print 123
+        print data.get("switchlock")
+        if data.get("switchlock")=="true":
+             mmain()
+        print data.get("chain")
+        data = convert(data)
+        print data
+        if not data or not isinstance(data, dict):
+            raise tornado.web.HTTPError(406)
+        for key in ["chain", "sip", "dip", "sport", "dport", "protocol", "iintf", "ointf", "action","a111"]:
+            if key not in data:
+                raise tornado.web.HTTPError(406)
+        if not self._check_dict(data):
+            raise tornado.web.HTTPError(406)
+        chain_name = data.get("chain")
+        print data.get("a111")
+        print data.get("chain")
+        add_rule = SetIptables(debug=True,
+                               table_name="filter",
+                               chain_name=chain_name,
+                               method="add",
+                               rule_dict=data)
+        error_message = ""
+        success = add_rule.successful()
+        if not success:
+            error_message = add_rule.error_message
+        self.write({"result": str(success), "error_message": error_message})
+
+    def _check_dict(self, dt):
+        if not dt.get("chain") or not dt.get("action"):
+            return False
+        return True
+
+
+class FirewallDeleteHandler(BaseHandler):
+    """
+    API
+    
+    INPUT
+    POST
+    {"chain":"INPUT", "number":0}
+    
+    OUTPUT
+    未登录 401
+    数据格式异常 406
+    成功删除 200 {"result":"True", "error_message":"error"}
+    """
+
+    def post(self):
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+            raise tornado.web.HTTPError(401)
+        else:
+            if not self.request.body:
+                raise tornado.web.HTTPError(406)
+            data = json.loads(self.request.body.decode('utf-8'))
+            if not data or not isinstance(data, dict):
+                raise tornado.web.HTTPError(406)
+            if "chain" not in data or "number" not in data:
+                raise tornado.web.HTTPError(406)
+            print 123
+            print data.get("switchlock")
+            if data.get("switchlock")=="on":
+                mmain()
+                print "netfilter.py is running"
+            chain = str(data.get("chain"))
+            number = data.get("number")
+            delete_dict = {"number": str(number)}
+            print chain, delete_dict
+            set_iptb = SetIptables(debug=False, table_name="filter", chain_name=chain, method="delete",
+                                   rule_dict=delete_dict)
+            error_message = ""
+            success = set_iptb.successful()
+            if not success:
+                error_message = set_iptb.error_message
+            res = {"result": str(success), "error_message": error_message}
+            self.write(res)
+
+
+class IPSHandler(BaseHandler):
+    """
+    API
+    INPUT
+    GET /ips
+
+    OUTPUT
+    未登录 401`
+    200 {"result": ...}
+    """
+    def get(self):
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+            raise tornado.web.HTTPError(401)
+        else:
+            ips_coll = get_coll()
+            data = ips_coll.get_suricata_log(0, 100)
+            arr = []
+            for da in data:
+                del da['_id']
+		arr.append(da)
+            self.write({"result":arr})
+
+
+def run_web_on_local():
+    tornado.options.parse_command_line()
+    http_server = tornado.httpserver.HTTPServer(Application())
+    http_server.listen(options.port)
+    # logging.info("[+] config done: 127.0.0.1:" + str(options.port))
+    tornado.ioloop.IOLoop.current().start()
+
+
+def judge_netfilter(self,kk):
+        login_check = self.get_secure_cookie("login")
+        if not login_check:
+                raise tornado.web.HTTPError(401)
+        else:
+                if(self.get_argument["name"]=="a111"):
+                    print "netfilter.py is running"
+                    mmain()
+                else:
+                    print "netfilter已经关闭！"
+                	
+			
+
+if __name__ == "__main__":
+    run_web_on_local()
+    judge_netfilter()

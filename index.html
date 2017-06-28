@@ -1,0 +1,125 @@
+<html>
+<head>
+    <title>FireWall-index</title>
+	<meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+    <link rel="stylesheet" type="text/css" href="../static/globalCSS.css">
+    <link rel="stylesheet" type="text/css" href="../static/indexCSS.css">
+    <script type="text/javascript" src="../static/jquery-3.1.1.js"></script>
+	<script type="text/javascript"src="../static/buttonlook.js"></script>
+    <link rel="stylesheet" href="../static/button.css" type="text/css"> 
+</head>
+<body>
+<div id="container">
+    <div id="aside">
+        <div id="tagBox">
+            <div class="asideList" id="tag1">系统状态</div>
+            <div class="asideList" id="tag2">防火墙</div>
+            <div class="asideList" id="tag3">入侵检测</div>
+        </div>
+    </div>
+    <div id="content">
+        <div id="contentSys">
+            <div id="sysStatus"></div>
+            <button id="refresh">刷新</button>
+        </div>
+        <div id="contentFW">
+            <div id="firewallRules">
+                <table id="inputChain">
+                    <caption>INPUT</caption>
+                    <thead class="head">
+                    <td>协议类型</td>
+                    <td>源地址</td>
+                    <td>源端口</td>
+                    <td>目的地址</td>
+                    <td>目的端口</td>
+                    <td>接口名(入)</td>
+                    <td>接口名(出)</td>
+                    <td>操作</td>
+                    </thead>
+                </table>
+                <table id="outputChain">
+                    <caption>OUTPUT</caption>
+                    <thead class="head">
+                    <td>协议类型</td>
+                    <td>源地址</td>
+                    <td>源端口</td>
+                    <td>目的地址</td>
+                    <td>目的端口</td>
+                    <td>接口名(入)</td>
+                    <td>接口名(出)</td>
+                    <td>操作</td>
+                    </thead>
+                </table>
+                <table id="forwardChain">
+                    <caption>FORWARD</caption>
+                    <thead>
+                    <td>协议类型</td>
+                    <td>源地址</td>
+                    <td>源端口</td>
+                    <td>目的地址</td>
+                    <td>目的端口</td>
+                    <td>接口名(入)</td>
+                    <td>接口名(出)</td>
+                    <td>操作</td>
+                    </thead>
+
+                </table>
+            </div>
+            <button id="refresh2">刷新</button>
+            <div id="delConfirm">
+                <p>确认删除？</p>
+                <button id="delConfirmTrue">是</button>
+                <button id="delConfirmFalse">否</button>
+                <p id="delError"></p>
+            </div>
+            <button id="addRulesBtn">添加规则</button>
+            <div id="addRules">
+                <p id="addRulesP">添加规则</p>
+                <div>
+                    <p>
+                        <input type="radio" name="chain" value="INPUT" checked>INPUT
+                        <input type="radio" name="chain" value="OUTPUT">OUTPUT
+                        <input type="radio" name="chain" value="FORWARD">FORWARD
+                    </p>
+                    <p>源IP<input type="text" id="sip" class="addInput"></p>
+                    <p>目的IP<input type="text" id="dip" class="addInput"></p>
+                    <p>源端口<input type="text" id="sport" class="addInput"></p>
+                    <p>目的端口<input type="text" id="dport" class="addInput"></p>
+                    <p>
+                        <input type="radio" name="protocol" value="tcp" checked>TCP
+                        <input type="radio" name="protocol" value="udp">UDP
+					</p>
+					<p>
+						<div class="testswitch">  
+                        <input class="testswitch-checkbox" name="switcher1" id="onoffswitch" type="checkbox">
+								
+						<label class="testswitch-label" for="onoffswitch">  
+						<span class="testswitch-inner" name="switcher" data-on="ON" data-off="OFF"></span>  
+						<span class="testswitch-switch"></span>  
+						</label>modbus/tcp检测开关
+						</div>  
+                        
+                    </p>
+					<p><br/><br/><br/></p><p></p><p></p><p></p><p></p><p></p>
+                    <p>接口(入)<input type="text" id="iintf" class="addInput"></p>
+                    <p>接口(出)<input type="text" id="ointf" class="addInput"></p>
+                    <input type="radio" name="action" value="accept" checked>accept
+                    <input type="radio" name="action" value="drop">drop
+					<input type="radio" name="action" value="reject">reject
+				    <input type="radio" name="action" value="queue">queue<br/><br/>
+                    <button id="addConfirm">添加</button>
+                    <button id="addCancel">取消</button>
+                </div>
+            </div>
+        </div>
+        <div id="contentDet">
+            <div></div>
+            <button id="refresh3">刷新</button>
+        </div>
+    </div>
+</div>
+<script type="text/javascript" src="../static/indexJS.js"></script>
+<script type="text/javascript" src="../static/indexJS2.js"></script>
+</body>
+</html>
+
