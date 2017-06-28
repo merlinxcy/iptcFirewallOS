@@ -69,7 +69,10 @@ class PacketFilter:
 		self.afterdecode=package_after_decode
 		##
 		#print self.afterdecode
-		self.judge_iec61850_mms()
+		if self.judge_iec61850_mms()==False:
+			package.set_verdict(nfqueue.NF_DROP)
+
+
 		package.set_verdict(nfqueue.NF_ACCEPT)
 		##
 		'''
@@ -89,6 +92,7 @@ class PacketFilter:
 			print("this is udp package")
 			return True
 	'''
+
 
 	def judge_tcp_attack(self):
 		if(self.afterdecode[66:68]=='03'):#syn and find can't be 1 together
@@ -183,19 +187,33 @@ class PacketFilter:
 							#print "1"'
 							location=-1
 						 	init_mms_fingerprint_length=len(self.init_mms_fingerprint)
-							for i in range(0,init_mms_fingerprint_length-1):
-								if self.init_mms_fingerprint[i]['ip_source']==ip_info.src and self.init_mms_fingerprint[i]['tcp_sport']==tcp_info.sport and self.init_mms_fingerprint[i]['tcp_dport']==tcp_info.dport:
+						 	print self.init_mms_fingerprint
+						 	print init_mms_fingerprint_length
+							for i in range(0,init_mms_fingerprint_length):
+								print "in for xuanhuan"
+								print self.init_mms_fingerprint[i]['ip_source']
+								print self.init_mms_fingerprint[i]['tcp_sport']
+								print self.init_mms_fingerprint[i]['tcp_dport']
+								print socket.inet_ntoa(ip_info.src)
+								print int(self.afterdecode[40:44],16)
+								print int(self.afterdecode[44:48],16)
+								if str(self.init_mms_fingerprint[i]['ip_source'])==str(socket.inet_ntoa(ip_info.src)) \
+								and str(self.init_mms_fingerprint[i]['tcp_sport'])==str(int(self.afterdecode[40:44],16)) \
+								and str(self.init_mms_fingerprint[i]['tcp_dport'])==str(int(self.afterdecode[44:48],16)):
 									location=i
+									print "okok"
 									break
 								else:
+									print "nonononono"
 									if i==init_mms_fingerprint_length-1:
 										location=-1
 							if location!=-1:
 								for t in self.init_mms_fingerprint[location]['init_mms_support_service']:
-									if t==self.iec61850_mms_func:
+									#print "for in init_mms_fingerprint"
+									if t==tmpfun:
 										print "[+]Identify"
 										return True
-
+							print "[-]mms request/response packet unidentify"
 							return False#最后都没找到return False
 
 
@@ -212,27 +230,30 @@ class PacketFilter:
 							##这边加一个对服务器支持服务的判别，可以用来过滤上下文的请求数据包,可能存在问题
 							data = self.package.get_data()
 							ip_info = dpkt.ip.IP(data)
-							tcp_info= dpkt.tcp.TCP(data)
 							tmp_funcode=self.afterdecode[456:478]#取出init报文的服务器支持功能码以供上下文判断
 							tmp_funcode_bin=''
+							print tmp_funcode
 							#计算出服务开启的二进制位
-							for i in range(0,len(tmp_funcode)/2-1):
-								t=tmp_funcode[2*i]+tmp_funcode[i+1]
-								t=str(bin(int(t,16)))[2:]
+							for i in range(0,len(tmp_funcode)/2):
+								t=tmp_funcode[2*i]+tmp_funcode[2*i+1]
+								print t
+								t=str(bin(int(t,16)))[2:].zfill(8)
 								print t
 								tmp_funcode_bin+=t
 							#匹配服务
+							print tmp_funcode_bin
 							init_mms_support_service=list()
 							for i in range(0,len(self.iec61850_mms_func)-1):
-								if tmp_funcode_bin=='1':
+								if tmp_funcode_bin[i]=='1':
 									init_mms_support_service.append(self.iec61850_mms_func[i])
 							mms_finger={
-							"ip_source":str(ip_info.src),
-							"tcp_sport":str(tcp_info.sport),
-							"tcp_dport":str(tcp_info.dport),
+							"ip_source":str(socket.inet_ntoa(ip_info.src)),
+							"tcp_sport":str(int(self.afterdecode[40:44],16)),
+							"tcp_dport":str(int(self.afterdecode[44:48],16)),
 							"init_mms_support_service":init_mms_support_service
 							}
 							self.init_mms_fingerprint.append(mms_finger)
+							print self.init_mms_fingerprint
 							#到这里为止init mms中支持的服务已经被记录，以供来检查后续报文的合法性
 
 
