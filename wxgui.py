@@ -4,6 +4,7 @@
 import wx
 from  tkinter import  *
 import hashlib
+
 def encode(passwd):
 	enc=hashlib.md5()
 	enc.update(passwd)
